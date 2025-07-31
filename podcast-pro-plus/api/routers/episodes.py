@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from pathlib import Path
 from typing import List, Optional, Dict
 from uuid import UUID
+import os
 
 from pydub import AudioSegment
 
