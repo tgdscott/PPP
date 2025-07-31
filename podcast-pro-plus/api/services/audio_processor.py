@@ -29,6 +29,14 @@ class AudioProcessingError(Exception):
     """Custom exception for audio processing failures."""
     pass
 
+def _format_timestamp(seconds: float) -> str:
+    """Helper function to format seconds into HH:MM:SS,ms format."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds * 1000) % 1000)
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
 def process_and_assemble_episode(
     template: PodcastTemplate,
     main_content_filename: str,
@@ -71,12 +79,36 @@ def process_and_assemble_episode(
     log.append(f"[TIMING] Content cleanup took {time.time() - step_start_time:.2f}s")
 
     # --- Step 3: Final Transcript for AI Context & Saving ---
-    final_transcript = " ".join([word['word'] for word in word_timestamps])
+    # We use the original word_timestamps to build the final transcript
+    final_transcript_text = " ".join([word['word'] for word in word_timestamps])
+    
     transcript_filename = f"{output_filename}.txt"
     transcript_path = TRANSCRIPTS_DIR / transcript_filename
     with open(transcript_path, "w", encoding="utf-8") as f:
-        f.write(final_transcript)
-    log.append(f"Saved final transcript to {transcript_filename}")
+        # Group words into sentences or phrases for a cleaner transcript
+        current_line = ""
+        line_start_time = 0
+        for i, word_data in enumerate(word_timestamps):
+            if not current_line:
+                line_start_time = word_data['start']
+            
+            current_line += word_data['word'] + " "
+            
+            # End line after about 15 words or if there's a long pause
+            is_last_word = (i == len(word_timestamps) - 1)
+            long_pause = False
+            if not is_last_word:
+                pause = word_timestamps[i+1]['start'] - word_data['end']
+                if pause > 0.7:
+                    long_pause = True
+
+            if len(current_line.split()) >= 15 or is_last_word or long_pause:
+                line_end_time = word_data['end']
+                f.write(f"[{_format_timestamp(line_start_time)} --> {_format_timestamp(line_end_time)}]\n")
+                f.write(f"{current_line.strip()}\n\n")
+                current_line = ""
+
+    log.append(f"Saved final timestamped transcript to {transcript_filename}")
 
     # --- Step 4: Prepare Template Segments ---
     step_start_time = time.time()
@@ -92,7 +124,7 @@ def process_and_assemble_episode(
                 continue
             audio = AudioSegment.from_file(static_path)
         elif segment_rule.source.source_type == 'ai_generated':
-            contextual_prompt = f"Based on the following podcast transcript, {segment_rule.source.prompt}:\n\n---\n\n{final_transcript}"
+            contextual_prompt = f"Based on the following podcast transcript, {segment_rule.source.prompt}:\n\n---\n\n{final_transcript_text}"
             generated_text = ai_enhancer.get_answer_for_topic(contextual_prompt)
             audio = ai_enhancer.generate_speech_from_text(generated_text, segment_rule.source.voice_id)
             log.append(f"Generated AI segment for prompt: '{segment_rule.source.prompt}'")
@@ -114,7 +146,6 @@ def process_and_assemble_episode(
     stitched_content = sum(content_segments) if content_segments else AudioSegment.empty()
     stitched_outros = sum(outros) if outros else AudioSegment.empty()
 
-    # --- New "Silent Canvas" Logic ---
     intro_len_ms = len(stitched_intros)
     content_len_ms = len(stitched_content)
     outro_len_ms = len(stitched_outros)
@@ -130,7 +161,6 @@ def process_and_assemble_episode(
     final_audio = final_audio.overlay(stitched_content, position=content_start_ms)
     final_audio = final_audio.overlay(stitched_outros, position=outro_start_ms)
     
-    # Apply music to the entire intro block
     for music_rule in template.background_music_rules:
         music_path = UPLOAD_DIR / music_rule.music_filename
         if not music_path.exists(): continue

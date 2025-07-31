@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, ArrowUp, ArrowDown, Wand2, FileAudio, Music, Save, Zap, Sparkles, MicOff, Type, Edit, Timer } from 'lucide-react';
+import { PlusCircle, Trash2, ArrowUp, ArrowDown, Wand2, FileAudio, Music, Save, Zap, Sparkles, MicOff, Type, Edit, Timer, UploadCloud } from 'lucide-react';
 
 // --- Helper: Generate a unique ID ---
 const generateUUID = () => crypto.randomUUID();
@@ -7,7 +7,7 @@ const API_BASE_URL = 'http://127.0.0.1:8000';
 
 // --- Main App Component ---
 export default function App() {
-  const [view, setView] = useState('editor');
+  const [view, setView] = useState('assembler');
   const [templates, setTemplates] = useState([]);
   const [currentTemplate, setCurrentTemplate] = useState(null);
   
@@ -215,11 +215,15 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [mainContentFile, setMainContentFile] = useState('F1.wav');
     const [outputFilename, setOutputFilename] = useState('final_F1_episode');
-    const [cleanupOptions, setCleanupOptions] = useState({ removePauses: true, removeFillers: true, checkForFlubber: true, checkForIntern: true });
+    const [cleanupOptions, setCleanupOptions] = useState({ removePauses: true, removeFillers: true, checkForFlubber: false, checkForIntern: false });
     const [ttsOverrides, setTtsOverrides] = useState({});
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingLog, setProcessingLog] = useState([]);
     const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+    const [assembledFile, setAssembledFile] = useState(null);
+    const [publishTitle, setPublishTitle] = useState('');
+    const [publishDescription, setPublishDescription] = useState('');
+    const [spreakerShowId, setSpreakerShowId] = useState('');
 
     useEffect(() => {
         if (templates.length > 0 && !selectedTemplateId) {
@@ -251,6 +255,7 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
             return;
         }
         setIsProcessing(true);
+        setAssembledFile(null);
         setProcessingLog([]);
         try {
             const response = await fetch(`${API_BASE_URL}/episodes/process-and-assemble`, {
@@ -264,7 +269,9 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
             }
             const result = await response.json();
             setProcessingLog(result.log);
-            showTempNotification(`Success! Episode saved to ${result.output_path}`, 'success');
+            const finalFilename = result.output_path.split(/[\\/]/).pop();
+            setAssembledFile(finalFilename);
+            showTempNotification(`Success! Episode assembled!`, 'success');
         } catch (error) {
             showTempNotification(`Error: ${error.message}`, 'error');
             setProcessingLog(prev => [...prev, `ERROR: ${error.message}`]);
@@ -273,9 +280,55 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
         }
     };
 
+    const handleAutofill = async () => {
+        if (!assembledFile) return;
+        setIsProcessing(true);
+        try {
+             const response = await fetch(`${API_BASE_URL}/episodes/generate-metadata/${assembledFile}`);
+             if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to generate metadata');
+            }
+            const metadata = await response.json();
+            setPublishTitle(metadata.title);
+            setPublishDescription(metadata.summary);
+            showTempNotification('Metadata auto-filled!', 'success');
+        } catch (error) {
+            showTempNotification(`Error: ${error.message}`, 'error');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handlePublish = async () => {
+        if (!assembledFile || !spreakerShowId || !publishTitle) {
+            showTempNotification('Please provide a Show ID and Title.', 'error');
+            return;
+        }
+        setIsProcessing(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/episodes/publish/spreaker/${assembledFile}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ show_id: spreakerShowId, title: publishTitle, description: publishDescription }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to publish');
+            }
+            const result = await response.json();
+            showTempNotification(result.message, 'success');
+            setProcessingLog(prev => [...prev, `PUBLISHED: ${result.message}`]);
+        } catch (error) {
+            showTempNotification(`Error: ${error.message}`, 'error');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     return (
         <>
-            <Section title="Process & Assemble Episode" icon={<Zap />}>
+            <Section title="Step 1: Process & Assemble Episode" icon={<Zap />}>
                 <div className="space-y-6">
                     <div>
                         <label className="block text-sm font-medium text-slate-400 mb-2">Main Content Audio File</label>
@@ -309,6 +362,40 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
                     <div className="pt-2"><button onClick={handleProcessAndAssemble} disabled={isProcessing} className="w-full flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-4 px-4 rounded-lg shadow-md transition-all duration-300 text-lg">{isProcessing ? 'Processing...' : <><Zap size={20} /> Process & Assemble Episode</>}</button></div>
                 </div>
             </Section>
+
+            {assembledFile && (
+                <Section title="Step 2: Publish Episode" icon={<UploadCloud />}>
+                    <div className="space-y-6">
+                        <div className="bg-slate-900/50 p-4 rounded-lg">
+                            <p className="text-sm text-slate-400">Ready to publish:</p>
+                            <p className="font-mono text-indigo-300">{assembledFile}</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Spreaker Show ID</label>
+                            <input type="text" value={spreakerShowId} onChange={e => setSpreakerShowId(e.target.value)} placeholder="e.g., 1234567" className="w-full bg-slate-700 p-3 rounded-md border border-slate-600" />
+                        </div>
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="block text-sm font-medium text-slate-400">Episode Title</label>
+                                <button onClick={handleAutofill} disabled={isProcessing} className="text-sm flex items-center gap-1 text-indigo-400 hover:text-indigo-300 disabled:opacity-50">
+                                    <Wand2 size={14}/> Auto-fill with AI
+                                </button>
+                            </div>
+                            <input type="text" value={publishTitle} onChange={e => setPublishTitle(e.target.value)} placeholder="Your Episode Title" className="w-full bg-slate-700 p-3 rounded-md border border-slate-600" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Description / Show Notes</label>
+                            <textarea value={publishDescription} onChange={e => setPublishDescription(e.target.value)} placeholder="Your episode summary and show notes..." className="w-full bg-slate-700 p-3 rounded-md border border-slate-600" rows="4" />
+                        </div>
+                        <div className="pt-2">
+                            <button onClick={handlePublish} disabled={isProcessing} className="w-full flex items-center justify-center gap-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-bold py-4 px-4 rounded-lg shadow-md transition-all duration-300 text-lg">
+                                {isProcessing ? 'Publishing...' : <><UploadCloud size={20} /> Publish to Spreaker</>}
+                            </button>
+                        </div>
+                    </div>
+                </Section>
+            )}
+            
             {processingLog.length > 0 && (<div className="mt-6 bg-slate-900 p-4 rounded-md"><h4 className="font-semibold text-slate-300 mb-2">Processing Log:</h4><ul className="text-xs font-mono text-slate-400 space-y-1">{processingLog.map((log, i) => <li key={i} className={log.startsWith('ERROR') ? 'text-rose-400' : ''}>{log}</li>)}</ul></div>)}
             <Notification notification={notification} />
         </>
