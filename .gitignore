@@ -99,3 +99,4 @@ ai_segments/
 tests/
 transcripts/
 otherstuff/
+.vercel
