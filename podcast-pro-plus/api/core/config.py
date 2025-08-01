@@ -6,6 +6,16 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: str = "YOUR_API_KEY_HERE"
     SPREAKER_API_TOKEN: str = "YOUR_SPREAKER_TOKEN_HERE"
 
+    # --- Google OAuth Settings ---
+    GOOGLE_CLIENT_ID: str = "YOUR_GOOGLE_CLIENT_ID"
+    GOOGLE_CLIENT_SECRET: str = "YOUR_GOOGLE_CLIENT_SECRET"
+
+    # --- JWT Authentication Settings ---
+    # To generate a new secret key, run: openssl rand -hex 32
+    SECRET_KEY: str = "YOUR_SECRET_KEY_HERE"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
     class Config:
         env_file = ".env"
 

@@ -1,216 +1,350 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, ArrowUp, ArrowDown, Wand2, FileAudio, Music, Save, Zap, Sparkles, MicOff, Type, Edit, Timer, UploadCloud } from 'lucide-react';
+import { useAuth } from './AuthContext'; // Import the useAuth hook
+import { PlusCircle, Trash2, ArrowUp, ArrowDown, Wand2, FileAudio, Music, Save, Zap, Sparkles, MicOff, Type, Edit, Timer, UploadCloud, LogOut } from 'lucide-react';
 
-// --- Helper: Generate a unique ID ---
+// --- Constants ---
 const generateUUID = () => crypto.randomUUID();
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
-// --- Main App Component ---
-export default function App() {
-  const [view, setView] = useState('assembler');
-  const [templates, setTemplates] = useState([]);
-  const [currentTemplate, setCurrentTemplate] = useState(null);
-  
-  const fetchTemplates = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/templates/`);
-      if (!response.ok) throw new Error('Failed to fetch templates');
-      const data = await response.json();
-      setTemplates(data);
-      return data;
-    } catch (error) {
-      console.error("Error fetching templates:", error);
-      return [];
-    }
-  };
+// --- Login Page Component ---
+const LoginPage = () => {
+    const { login } = useAuth();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError('');
 
-  const handleEditTemplate = (templateId) => {
-    const templateToEdit = templates.find(t => t.id === templateId);
-    if (templateToEdit) {
-      const editableTemplate = {
-        ...templateToEdit,
-        segments: templateToEdit.segments.map(s => ({ ...s, id: generateUUID() })),
-        background_music_rules: templateToEdit.background_music_rules.map(r => ({ ...r, id: generateUUID() })),
-      };
-      setCurrentTemplate(editableTemplate);
-      setView('editor');
-    }
-  };
+        const formData = new URLSearchParams();
+        formData.append('username', email);
+        formData.append('password', password);
 
-  const handleNewTemplate = () => {
-    setCurrentTemplate(null);
-    setView('editor');
-  };
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData,
+            });
 
-  return (
-    <div className="bg-slate-900 min-h-screen text-white font-sans p-4 sm:p-6 lg:p-8">
-      <div className="max-w-4xl mx-auto">
-        <Header currentView={view} setView={setView} onNewTemplate={handleNewTemplate} />
-        {view === 'editor' ? 
-          <TemplateEditor 
-            key={currentTemplate ? currentTemplate.id : 'new'}
-            initialTemplate={currentTemplate} 
-            onSaveSuccess={fetchTemplates}
-          /> : 
-          <EpisodeAssembler 
-            templates={templates}
-            onEditTemplate={handleEditTemplate}
-          />}
-      </div>
-    </div>
-  );
-}
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.detail || 'Login failed');
+            }
 
-const Header = ({ currentView, setView, onNewTemplate }) => (
-  <div className="flex justify-between items-center mb-8">
-    <h1 className="text-3xl sm:text-4xl font-bold text-slate-100">
-      {currentView === 'editor' ? 'Template Editor' : 'Episode Workflow'}
-    </h1>
-    <div className="flex gap-2 p-1 bg-slate-800 rounded-lg">
-      <button onClick={onNewTemplate} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${currentView === 'editor' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
-        Editor
-      </button>
-      <button onClick={() => setView('assembler')} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${currentView === 'assembler' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
-        Assembler
-      </button>
-    </div>
-  </div>
-);
-
-
-// --- Template Editor Component ---
-const TemplateEditor = ({ initialTemplate, onSaveSuccess }) => {
-  const isEditMode = !!initialTemplate;
-  const [templateName, setTemplateName] = useState(initialTemplate?.name || 'New Podcast Template');
-  const [segments, setSegments] = useState(initialTemplate?.segments || [
-    { id: generateUUID(), segment_type: 'content', source: { source_type: 'static', filename: 'placeholder.mp3' } }
-  ]);
-  const [musicRules, setMusicRules] = useState(initialTemplate?.background_music_rules || []);
-  const [timing, setTiming] = useState(initialTemplate?.timing || { content_start_offset_s: -2.0, outro_start_offset_s: -5.0 });
-  
-  const [isSaving, setIsSaving] = useState(false);
-  const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
-
-  const showTempNotification = (message, type = 'success', duration = 3000) => {
-    setNotification({ show: true, message, type });
-    setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), duration);
-  };
-
-  const addSegment = (type) => {
-    const newSegment = {
-      id: generateUUID(),
-      segment_type: type,
-      source: { source_type: 'static', filename: '' },
+            const data = await response.json();
+            login(data.access_token);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setIsLoading(false);
+        }
     };
-    const contentIndex = segments.findIndex(seg => seg.segment_type === 'content');
-    const newSegments = [...segments];
-    if (type === 'intro' && contentIndex !== -1) {
-      newSegments.splice(contentIndex, 0, newSegment);
-    } else {
-      newSegments.push(newSegment);
-    }
-    setSegments(newSegments);
-  };
-
-  const updateSegment = (id, updatedSegment) => {
-    setSegments(segments.map(seg => (seg.id === id ? { ...seg, ...updatedSegment } : seg)));
-  };
-
-  const removeSegment = (id) => {
-    if (segments.find(s => s.id === id)?.segment_type === 'content') return;
-    setSegments(segments.filter(seg => seg.id !== id));
-  };
-
-  const moveSegment = (index, direction) => {
-    if (segments[index + direction]?.segment_type === 'content' || segments[index]?.segment_type === 'content') return;
-    const newSegments = [...segments];
-    const [movedSegment] = newSegments.splice(index, 1);
-    newSegments.splice(index + direction, 0, movedSegment);
-    setSegments(newSegments);
-  };
-  
-  const addMusicRule = () => {
-    setMusicRules([...musicRules, { id: generateUUID(), music_filename: '', apply_to_segments: ['content'], start_offset_s: 0, end_offset_s: 0, fade_in_s: 3, fade_out_s: 5, volume_db: -15 }]);
-  };
-
-  const updateMusicRule = (id, updatedRule) => {
-    setMusicRules(musicRules.map(rule => (rule.id === id ? { ...rule, ...updatedRule } : rule)));
-  };
-  
-  const removeMusicRule = (id) => {
-    setMusicRules(musicRules.filter(rule => rule.id !== id));
-  };
-  
-  const handleSave = async () => {
-    setIsSaving(true);
-    const finalTemplate = {
-      id: initialTemplate?.id,
-      user_id: initialTemplate?.user_id || generateUUID(),
-      name: templateName,
-      segments: segments.map(({ id, ...rest }) => rest),
-      background_music_rules: musicRules.map(({ id, ...rest }) => rest),
-      timing: timing,
+    
+    const handleGoogleLogin = () => {
+        window.location.href = `${API_BASE_URL}/auth/login/google`;
     };
 
-    const url = isEditMode ? `${API_BASE_URL}/templates/${initialTemplate.id}` : `${API_BASE_URL}/templates/`;
-    const method = isEditMode ? 'PUT' : 'POST';
-
-    try {
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(finalTemplate),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to save template');
-      }
-      await response.json();
-      showTempNotification(`Template '${templateName}' saved successfully!`);
-      onSaveSuccess();
-    } catch (error) {
-      showTempNotification(`Error: ${error.message}`, 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="flex justify-end items-center mb-8">
-        <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-300">
-          {isSaving ? 'Saving...' : <><Save size={18} /> {isEditMode ? 'Update Template' : 'Save New Template'}</>}
-        </button>
-      </div>
-      <div className="bg-slate-800 rounded-xl p-6 mb-8 shadow-lg">
-        <label htmlFor="templateName" className="block text-sm font-medium text-slate-400 mb-2">TEMPLATE NAME</label>
-        <input id="templateName" type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="w-full bg-slate-700 text-slate-100 text-xl p-3 rounded-md border border-slate-600 focus:ring-2 focus:ring-indigo-500" placeholder="e.g., Weekly Interview Show" />
-      </div>
-      <Section title="Podcast Segments" icon={<FileAudio />} actionButton={<button onClick={() => addSegment('intro')} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors text-sm"><PlusCircle size={16} /> Add Intro</button>}>
-        <div className="space-y-4">{segments.map((segment, index) => (<SegmentEditor key={segment.id} segment={segment} onUpdate={updateSegment} onRemove={removeSegment} onMove={moveSegment} index={index} totalSegments={segments.length} />))}</div>
-        <div className="mt-6 flex gap-4"><button onClick={() => addSegment('outro')} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors"><PlusCircle size={18} /> Add Outro</button></div>
-      </Section>
-      <Section title="Segment Timing & Overlaps" icon={<Timer />}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <NumberInput label="Content Start Offset (s)" value={timing.content_start_offset_s} onChange={v => setTiming({...timing, content_start_offset_s: v})} step={0.1} />
-          <NumberInput label="Outro Start Offset (s)" value={timing.outro_start_offset_s} onChange={v => setTiming({...timing, outro_start_offset_s: v})} step={0.1} />
+    return (
+        <div className="flex items-center justify-center min-h-screen bg-slate-900">
+            <div className="w-full max-w-md p-8 space-y-8 bg-slate-800 rounded-2xl shadow-lg">
+                <div className="text-center">
+                    <h1 className="text-3xl font-bold text-white">Podcast Pro Plus</h1>
+                    <p className="mt-2 text-slate-400">Sign in to continue</p>
+                </div>
+                {error && <p className="text-center text-rose-400 bg-rose-900/50 p-3 rounded-md">{error}</p>}
+                <form className="space-y-6" onSubmit={handleLogin}>
+                    <div className="space-y-1">
+                        <label htmlFor="email" className="text-sm font-medium text-slate-300">Email Address</label>
+                        <input
+                            id="email"
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                            className="w-full px-4 py-2 text-slate-100 bg-slate-700 border border-slate-600 rounded-md focus:ring-2 focus:ring-indigo-500"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <label htmlFor="password" className="text-sm font-medium text-slate-300">Password</label>
+                        <input
+                            id="password"
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                            className="w-full px-4 py-2 text-slate-100 bg-slate-700 border border-slate-600 rounded-md focus:ring-2 focus:ring-indigo-500"
+                        />
+                    </div>
+                    <div>
+                        <button
+                            type="submit"
+                            disabled={isLoading}
+                            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        >
+                            {isLoading ? 'Signing in...' : 'Sign In'}
+                        </button>
+                    </div>
+                </form>
+                <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-slate-600" />
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                        <span className="px-2 bg-slate-800 text-slate-400">Or continue with</span>
+                    </div>
+                </div>
+                <div>
+                    <button
+                        onClick={handleGoogleLogin}
+                        className="w-full flex items-center justify-center gap-3 py-3 px-4 border border-slate-600 rounded-md shadow-sm text-sm font-medium text-slate-200 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500"
+                    >
+                        <svg className="w-5 h-5" aria-hidden="true" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12.5C5,8.75 8.36,5.73 12.19,5.73C15.19,5.73 17.5,6.78 18.25,7.74L20.5,5.5C18.83,3.83 15.83,2.5 12.19,2.5C6.42,2.5 2,7.45 2,12.5C2,17.55 6.42,22.5 12.19,22.5C17.6,22.5 21.9,18.33 21.9,12.81C21.9,12.06 21.68,11.56 21.35,11.1Z"></path>
+                        </svg>
+                        Sign in with Google
+                    </button>
+                </div>
+            </div>
         </div>
-        <p className="text-xs text-slate-500 mt-2">Use negative numbers for an overlap. E.g., -2.0 means the content will start 2 seconds before the intros finish.</p>
-      </Section>
-      <Section title="Background Music Rules" icon={<Music />}>
-        <div className="space-y-4">{musicRules.map(rule => (<MusicRuleEditor key={rule.id} rule={rule} onUpdate={updateMusicRule} onRemove={removeMusicRule} />))}</div>
-        <div className="mt-6"><button onClick={addMusicRule} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors"><PlusCircle size={18} /> Add Music Rule</button></div>
-      </Section>
-      <Notification notification={notification} />
-    </>
-  );
+    );
 };
 
-// --- Episode Assembler Component ---
+
+// --- Main Application Component (Protected) ---
+const MainApp = () => {
+    const [view, setView] = useState('assembler');
+    const [templates, setTemplates] = useState([]);
+    const [currentTemplate, setCurrentTemplate] = useState(null);
+    const { logout } = useAuth();
+    
+    const fetchTemplates = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/templates/`);
+            if (!response.ok) throw new Error('Failed to fetch templates');
+            const data = await response.json();
+            setTemplates(data);
+            return data;
+        } catch (error) {
+            console.error("Error fetching templates:", error);
+            return [];
+        }
+    };
+
+    useEffect(() => {
+        fetchTemplates();
+    }, []);
+
+    const handleEditTemplate = (templateId) => {
+        const templateToEdit = templates.find(t => t.id === templateId);
+        if (templateToEdit) {
+            const editableTemplate = {
+                ...templateToEdit,
+                segments: templateToEdit.segments.map(s => ({ ...s, id: generateUUID() })),
+                background_music_rules: templateToEdit.background_music_rules.map(r => ({ ...r, id: generateUUID() })),
+            };
+            setCurrentTemplate(editableTemplate);
+            setView('editor');
+        }
+    };
+
+    const handleNewTemplate = () => {
+        setCurrentTemplate(null);
+        setView('editor');
+    };
+
+    return (
+        <div className="bg-slate-900 min-h-screen text-white font-sans p-4 sm:p-6 lg:p-8">
+            <div className="max-w-4xl mx-auto">
+                <Header currentView={view} setView={setView} onNewTemplate={handleNewTemplate} onLogout={logout} />
+                {view === 'editor' ?
+                    <TemplateEditor
+                        key={currentTemplate ? currentTemplate.id : 'new'}
+                        initialTemplate={currentTemplate}
+                        onSaveSuccess={fetchTemplates}
+                    /> :
+                    <EpisodeAssembler
+                        templates={templates}
+                        onEditTemplate={handleEditTemplate}
+                    />}
+            </div>
+        </div>
+    );
+}
+
+// --- App Entry Point ---
+export default function App() {
+    const { isAuthenticated, login } = useAuth(); // Corrected function call
+
+    useEffect(() => {
+        // This effect runs once on page load to check for a Google redirect token
+        const hash = window.location.hash;
+        if (hash) {
+            const params = new URLSearchParams(hash.substring(1)); // remove #
+            const token = params.get('access_token');
+            if (token) {
+                login(token); // Use the login function from the context
+                window.location.hash = ''; // Clean up the URL
+            }
+        }
+    }, [login]); // Depend on login function
+
+    return isAuthenticated ? <MainApp /> : <LoginPage />;
+}
+
+// --- Components (TemplateEditor, EpisodeAssembler, etc.) ---
+// These are unchanged, but I'll include them here for completeness.
+
+const Header = ({ currentView, setView, onNewTemplate, onLogout }) => (
+    <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl sm:text-4xl font-bold text-slate-100">
+            {currentView === 'editor' ? 'Template Editor' : 'Episode Workflow'}
+        </h1>
+        <div className="flex items-center gap-4">
+            <div className="flex gap-2 p-1 bg-slate-800 rounded-lg">
+                <button onClick={onNewTemplate} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${currentView === 'editor' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
+                    Editor
+                </button>
+                <button onClick={() => setView('assembler')} className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${currentView === 'assembler' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700'}`}>
+                    Assembler
+                </button>
+            </div>
+            <button onClick={onLogout} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg" title="Logout">
+                <LogOut size={20} />
+            </button>
+        </div>
+    </div>
+);
+
+const TemplateEditor = ({ initialTemplate, onSaveSuccess }) => {
+    const isEditMode = !!initialTemplate;
+    const [templateName, setTemplateName] = useState(initialTemplate?.name || 'New Podcast Template');
+    const [segments, setSegments] = useState(initialTemplate?.segments || [
+        { id: generateUUID(), segment_type: 'content', source: { source_type: 'static', filename: 'placeholder.mp3' } }
+    ]);
+    const [musicRules, setMusicRules] = useState(initialTemplate?.background_music_rules || []);
+    const [timing, setTiming] = useState(initialTemplate?.timing || { content_start_offset_s: -2.0, outro_start_offset_s: -5.0 });
+    const [isSaving, setIsSaving] = useState(false);
+    const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+
+    const showTempNotification = (message, type = 'success', duration = 3000) => {
+        setNotification({ show: true, message, type });
+        setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), duration);
+    };
+
+    const addSegment = (type) => {
+        const newSegment = {
+            id: generateUUID(),
+            segment_type: type,
+            source: { source_type: 'static', filename: '' },
+        };
+        const contentIndex = segments.findIndex(seg => seg.segment_type === 'content');
+        const newSegments = [...segments];
+        if (type === 'intro' && contentIndex !== -1) {
+            newSegments.splice(contentIndex, 0, newSegment);
+        } else {
+            newSegments.push(newSegment);
+        }
+        setSegments(newSegments);
+    };
+
+    const updateSegment = (id, updatedSegment) => {
+        setSegments(segments.map(seg => (seg.id === id ? { ...seg, ...updatedSegment } : seg)));
+    };
+
+    const removeSegment = (id) => {
+        if (segments.find(s => s.id === id)?.segment_type === 'content') return;
+        setSegments(segments.filter(seg => seg.id !== id));
+    };
+
+    const moveSegment = (index, direction) => {
+        if (segments[index + direction]?.segment_type === 'content' || segments[index]?.segment_type === 'content') return;
+        const newSegments = [...segments];
+        const [movedSegment] = newSegments.splice(index, 1);
+        newSegments.splice(index + direction, 0, movedSegment);
+        setSegments(newSegments);
+    };
+
+    const addMusicRule = () => {
+        setMusicRules([...musicRules, { id: generateUUID(), music_filename: '', apply_to_segments: ['content'], start_offset_s: 0, end_offset_s: 0, fade_in_s: 3, fade_out_s: 5, volume_db: -15 }]);
+    };
+
+    const updateMusicRule = (id, updatedRule) => {
+        setMusicRules(musicRules.map(rule => (rule.id === id ? { ...rule, ...updatedRule } : rule)));
+    };
+
+    const removeMusicRule = (id) => {
+        setMusicRules(musicRules.filter(rule => rule.id !== id));
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        const finalTemplate = {
+            id: initialTemplate?.id,
+            user_id: initialTemplate?.user_id || generateUUID(),
+            name: templateName,
+            segments: segments.map(({ id, ...rest }) => rest),
+            background_music_rules: musicRules.map(({ id, ...rest }) => rest),
+            timing: timing,
+        };
+
+        const url = isEditMode ? `${API_BASE_URL}/templates/${initialTemplate.id}` : `${API_BASE_URL}/templates/`;
+        const method = isEditMode ? 'PUT' : 'POST';
+
+        try {
+            const response = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(finalTemplate),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to save template');
+            }
+            await response.json();
+            showTempNotification(`Template '${templateName}' saved successfully!`);
+            onSaveSuccess();
+        } catch (error) {
+            showTempNotification(`Error: ${error.message}`, 'error');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="flex justify-end items-center mb-8">
+                <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-all duration-300">
+                    {isSaving ? 'Saving...' : <><Save size={18} /> {isEditMode ? 'Update Template' : 'Save New Template'}</>}
+                </button>
+            </div>
+            <div className="bg-slate-800 rounded-xl p-6 mb-8 shadow-lg">
+                <label htmlFor="templateName" className="block text-sm font-medium text-slate-400 mb-2">TEMPLATE NAME</label>
+                <input id="templateName" type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="w-full bg-slate-700 text-slate-100 text-xl p-3 rounded-md border border-slate-600 focus:ring-2 focus:ring-indigo-500" placeholder="e.g., Weekly Interview Show" />
+            </div>
+            <Section title="Podcast Segments" icon={<FileAudio />} actionButton={<button onClick={() => addSegment('intro')} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors text-sm"><PlusCircle size={16} /> Add Intro</button>}>
+                <div className="space-y-4">{segments.map((segment, index) => (<SegmentEditor key={segment.id} segment={segment} onUpdate={updateSegment} onRemove={removeSegment} onMove={moveSegment} index={index} totalSegments={segments.length} />))}</div>
+                <div className="mt-6 flex gap-4"><button onClick={() => addSegment('outro')} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors"><PlusCircle size={18} /> Add Outro</button></div>
+            </Section>
+            <Section title="Segment Timing & Overlaps" icon={<Timer />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <NumberInput label="Content Start Offset (s)" value={timing.content_start_offset_s} onChange={v => setTiming({ ...timing, content_start_offset_s: v })} step={0.1} />
+                    <NumberInput label="Outro Start Offset (s)" value={timing.outro_start_offset_s} onChange={v => setTiming({ ...timing, outro_start_offset_s: v })} step={0.1} />
+                </div>
+                <p className="text-xs text-slate-500 mt-2">Use negative numbers for an overlap. E.g., -2.0 means the content will start 2 seconds before the intros finish.</p>
+            </Section>
+            <Section title="Background Music Rules" icon={<Music />}>
+                <div className="space-y-4">{musicRules.map(rule => (<MusicRuleEditor key={rule.id} rule={rule} onUpdate={updateMusicRule} onRemove={removeMusicRule} />))}</div>
+                <div className="mt-6"><button onClick={addMusicRule} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-2 px-4 rounded-lg transition-colors"><PlusCircle size={18} /> Add Music Rule</button></div>
+            </Section>
+            <Notification notification={notification} />
+        </>
+    );
+};
+
 const EpisodeAssembler = ({ templates, onEditTemplate }) => {
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
     const [mainContentFile, setMainContentFile] = useState('F1.wav');
@@ -224,6 +358,7 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
     const [publishTitle, setPublishTitle] = useState('');
     const [publishDescription, setPublishDescription] = useState('');
     const [spreakerShowId, setSpreakerShowId] = useState('');
+    const [isGenerating, setIsGenerating] = useState(false);
 
     useEffect(() => {
         if (templates.length > 0 && !selectedTemplateId) {
@@ -282,10 +417,10 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
 
     const handleAutofill = async () => {
         if (!assembledFile) return;
-        setIsProcessing(true);
+        setIsGenerating(true);
         try {
-             const response = await fetch(`${API_BASE_URL}/episodes/generate-metadata/${assembledFile}`);
-             if (!response.ok) {
+            const response = await fetch(`${API_BASE_URL}/episodes/generate-metadata/${assembledFile}`, { method: 'POST' });
+            if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.detail || 'Failed to generate metadata');
             }
@@ -296,7 +431,7 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
         } catch (error) {
             showTempNotification(`Error: ${error.message}`, 'error');
         } finally {
-            setIsProcessing(false);
+            setIsGenerating(false);
         }
     };
 
@@ -336,19 +471,19 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
                     </div>
                     <div className="flex items-end gap-2">
                         <div className="flex-grow">
-                          <label className="block text-sm font-medium text-slate-400 mb-2">Select a Template</label>
-                          <select value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} className="w-full bg-slate-700 p-3 rounded-md border border-slate-600">
-                              {templates.length === 0 ? (<option>Save a template in the Editor first...</option>) : (templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>))}
-                          </select>
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Select a Template</label>
+                            <select value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} className="w-full bg-slate-700 p-3 rounded-md border border-slate-600">
+                                {templates.length === 0 ? (<option>Save a template in the Editor first...</option>) : (templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>))}
+                            </select>
                         </div>
                         <button onClick={() => onEditTemplate(selectedTemplateId)} disabled={!selectedTemplateId} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                          <Edit size={18} /> Edit
+                            <Edit size={18} /> Edit
                         </button>
                     </div>
                     {Object.keys(ttsOverrides).length > 0 && (
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-2">Per-Episode TTS Scripts</label>
-                            <div className="space-y-2 bg-slate-700/50 p-4 rounded-lg">{Object.keys(ttsOverrides).map(segmentId => (<div key={segmentId}><textarea value={ttsOverrides[segmentId]} onChange={e => setTtsOverrides({...ttsOverrides, [segmentId]: e.target.value})} className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" rows="2" placeholder={`Script for TTS segment...`} /></div>))}</div>
+                            <div className="space-y-2 bg-slate-700/50 p-4 rounded-lg">{Object.keys(ttsOverrides).map(segmentId => (<div key={segmentId}><textarea value={ttsOverrides[segmentId]} onChange={e => setTtsOverrides({ ...ttsOverrides, [segmentId]: e.target.value })} className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" rows="2" placeholder={`Script for TTS segment...`} /></div>))}</div>
                         </div>
                     )}
                     <div>
@@ -357,7 +492,7 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-400 mb-2">Cleanup & Keyword Actions</label>
-                        <div className="grid grid-cols-2 gap-4 bg-slate-700/50 p-4 rounded-lg">{Object.keys(cleanupOptions).map(key => (<label key={key} className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={cleanupOptions[key]} onChange={e => setCleanupOptions({...cleanupOptions, [key]: e.target.checked})} className="h-4 w-4 rounded bg-slate-600 border-slate-500 text-indigo-600 focus:ring-indigo-500" /><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</span></label>))}</div>
+                        <div className="grid grid-cols-2 gap-4 bg-slate-700/50 p-4 rounded-lg">{Object.keys(cleanupOptions).map(key => (<label key={key} className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={cleanupOptions[key]} onChange={e => setCleanupOptions({ ...cleanupOptions, [key]: e.target.checked })} className="h-4 w-4 rounded bg-slate-600 border-slate-500 text-indigo-600 focus:ring-indigo-500" /><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</span></label>))}</div>
                     </div>
                     <div className="pt-2"><button onClick={handleProcessAndAssemble} disabled={isProcessing} className="w-full flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-4 px-4 rounded-lg shadow-md transition-all duration-300 text-lg">{isProcessing ? 'Processing...' : <><Zap size={20} /> Process & Assemble Episode</>}</button></div>
                 </div>
@@ -377,8 +512,8 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
                         <div>
                             <div className="flex justify-between items-center mb-2">
                                 <label className="block text-sm font-medium text-slate-400">Episode Title</label>
-                                <button onClick={handleAutofill} disabled={isProcessing} className="text-sm flex items-center gap-1 text-indigo-400 hover:text-indigo-300 disabled:opacity-50">
-                                    <Wand2 size={14}/> Auto-fill with AI
+                                <button onClick={handleAutofill} disabled={isProcessing || isGenerating} className="text-sm flex items-center gap-1 text-indigo-400 hover:text-indigo-300 disabled:opacity-50">
+                                    {isGenerating ? (<>Generating...</>) : (<><Wand2 size={14} /> Auto-fill with AI</>)}
                                 </button>
                             </div>
                             <input type="text" value={publishTitle} onChange={e => setPublishTitle(e.target.value)} placeholder="Your Episode Title" className="w-full bg-slate-700 p-3 rounded-md border border-slate-600" />
@@ -388,77 +523,75 @@ const EpisodeAssembler = ({ templates, onEditTemplate }) => {
                             <textarea value={publishDescription} onChange={e => setPublishDescription(e.target.value)} placeholder="Your episode summary and show notes..." className="w-full bg-slate-700 p-3 rounded-md border border-slate-600" rows="4" />
                         </div>
                         <div className="pt-2">
-                            <button onClick={handlePublish} disabled={isProcessing} className="w-full flex items-center justify-center gap-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-bold py-4 px-4 rounded-lg shadow-md transition-all duration-300 text-lg">
+                            <button onClick={handlePublish} disabled={isProcessing || isGenerating} className="w-full flex items-center justify-center gap-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-bold py-4 px-4 rounded-lg shadow-md transition-all duration-300 text-lg">
                                 {isProcessing ? 'Publishing...' : <><UploadCloud size={20} /> Publish to Spreaker</>}
                             </button>
                         </div>
                     </div>
                 </Section>
             )}
-            
+
             {processingLog.length > 0 && (<div className="mt-6 bg-slate-900 p-4 rounded-md"><h4 className="font-semibold text-slate-300 mb-2">Processing Log:</h4><ul className="text-xs font-mono text-slate-400 space-y-1">{processingLog.map((log, i) => <li key={i} className={log.startsWith('ERROR') ? 'text-rose-400' : ''}>{log}</li>)}</ul></div>)}
             <Notification notification={notification} />
         </>
     );
 };
 
-
-// --- UI Components ---
-const Notification = ({ notification }) => ( <div className={`fixed bottom-8 right-8 text-white py-3 px-6 rounded-lg shadow-xl transition-transform duration-300 ${notification.show ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'} ${notification.type === 'success' ? 'bg-green-500' : 'bg-rose-500'}`}>{notification.message}</div>);
-const Section = ({ title, icon, children, actionButton = null }) => ( <div className="bg-slate-800 rounded-xl p-6 mb-8 shadow-lg"><div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-slate-200 flex items-center gap-3">{React.cloneElement(icon, { size: 24, className: "text-indigo-400"})}{title}</h2>{actionButton}</div>{children}</div>);
+const Notification = ({ notification }) => (<div className={`fixed bottom-8 right-8 text-white py-3 px-6 rounded-lg shadow-xl transition-transform duration-300 ${notification.show ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'} ${notification.type === 'success' ? 'bg-green-500' : 'bg-rose-500'}`}>{notification.message}</div>);
+const Section = ({ title, icon, children, actionButton = null }) => (<div className="bg-slate-800 rounded-xl p-6 mb-8 shadow-lg"><div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-slate-200 flex items-center gap-3">{React.cloneElement(icon, { size: 24, className: "text-indigo-400" })}</h2>{actionButton}</div>{children}</div>);
 const SegmentEditor = ({ segment, onUpdate, onRemove, onMove, index, totalSegments }) => {
-  const isContent = segment.segment_type === 'content';
-  const handleSourceTypeChange = (e) => {
-    const newSourceType = e.target.value;
-    let newSource;
-    if (newSourceType === 'static') { newSource = { source_type: 'static', filename: '' }; } 
-    else if (newSourceType === 'ai_generated') { newSource = { source_type: 'ai_generated', prompt: '', voice_id: '19B4gjtpL5m876wS3Dfg' }; } 
-    else { newSource = { source_type: 'tts', script: '', voice_id: '19B4gjtpL5m876wS3Dfg' }; }
-    onUpdate(segment.id, { ...segment, source: newSource });
-  };
-  const handleSourceFieldChange = (field, value) => { onUpdate(segment.id, { ...segment, source: { ...segment.source, [field]: value } }); };
-  return (
-    <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-700">
-      <div className="flex items-start gap-4">
-        <div className="flex flex-col items-center gap-1 pt-1">
-          <button onClick={() => onMove(index, -1)} disabled={index === 0 || isContent} className="text-slate-400 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed"><ArrowUp size={20} /></button>
-          <span className="font-mono text-indigo-400 text-lg">{index + 1}</span>
-          <button onClick={() => onMove(index, 1)} disabled={index === totalSegments - 1 || isContent} className="text-slate-400 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed"><ArrowDown size={20} /></button>
-        </div>
-        <div className="flex-grow">
-          <div className="flex justify-between items-center mb-4">
-            <span className="text-lg font-bold capitalize text-slate-200">{segment.segment_type}</span>
-            {!isContent && (<button onClick={() => onRemove(segment.id)} className="text-rose-400 hover:text-rose-300"><Trash2 size={18} /></button>)}
-          </div>
-          {isContent ? (<p className="text-slate-400 italic">This is a placeholder for your main episode recording.</p>) : (
-            <div className="space-y-4">
-              <div className="flex items-center gap-4">
-                 <label className="text-slate-400 font-medium">Source:</label>
-                 <select value={segment.source.source_type} onChange={handleSourceTypeChange} className="bg-slate-600 rounded-md p-2 border border-slate-500">
-                    <option value="static">Static File</option>
-                    <option value="ai_generated">AI Generated</option>
-                    <option value="tts">TTS (Direct Script)</option>
-                 </select>
-              </div>
-              {segment.source.source_type === 'static' ? (
-                <div className="flex items-center gap-2"><FileAudio size={18} className="text-slate-400" /><input type="text" value={segment.source.filename} onChange={(e) => handleSourceFieldChange('filename', e.target.value)} placeholder="e.g., intro_theme.mp3" className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" /></div>
-              ) : segment.source.source_type === 'ai_generated' ? (
-                <div className="space-y-2">
-                   <div className="flex items-center gap-2"><Wand2 size={18} className="text-slate-400" /><input type="text" value={segment.source.prompt} onChange={(e) => handleSourceFieldChange('prompt', e.target.value)} placeholder="AI Prompt for script generation..." className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" /></div>
-                   <div className="flex items-center gap-2 pl-7"><input type="text" value={segment.source.voice_id} onChange={(e) => handleSourceFieldChange('voice_id', e.target.value)} placeholder="ElevenLabs Voice ID" className="w-full bg-slate-800 text-xs p-1 rounded-md border border-slate-600" /></div>
+    const isContent = segment.segment_type === 'content';
+    const handleSourceTypeChange = (e) => {
+        const newSourceType = e.target.value;
+        let newSource;
+        if (newSourceType === 'static') { newSource = { source_type: 'static', filename: '' }; }
+        else if (newSourceType === 'ai_generated') { newSource = { source_type: 'ai_generated', prompt: '', voice_id: '19B4gjtpL5m876wS3Dfg' }; }
+        else { newSource = { source_type: 'tts', script: '', voice_id: '19B4gjtpL5m876wS3Dfg' }; }
+        onUpdate(segment.id, { ...segment, source: newSource });
+    };
+    const handleSourceFieldChange = (field, value) => { onUpdate(segment.id, { ...segment, source: { ...segment.source, [field]: value } }); };
+    return (
+        <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-700">
+            <div className="flex items-start gap-4">
+                <div className="flex flex-col items-center gap-1 pt-1">
+                    <button onClick={() => onMove(index, -1)} disabled={index === 0 || isContent} className="text-slate-400 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed"><ArrowUp size={20} /></button>
+                    <span className="font-mono text-indigo-400 text-lg">{index + 1}</span>
+                    <button onClick={() => onMove(index, 1)} disabled={index === totalSegments - 1 || isContent} className="text-slate-400 hover:text-white disabled:text-slate-600 disabled:cursor-not-allowed"><ArrowDown size={20} /></button>
                 </div>
-              ) : ( // TTS
-                 <div className="space-y-2">
-                   <div className="flex items-start gap-2"><Type size={18} className="text-slate-400 mt-2" /><textarea value={segment.source.script} onChange={(e) => handleSourceFieldChange('script', e.target.value)} placeholder="Enter the exact script to be spoken..." className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" rows="3" /></div>
-                   <div className="flex items-center gap-2 pl-7"><input type="text" value={segment.source.voice_id} onChange={(e) => handleSourceFieldChange('voice_id', e.target.value)} placeholder="ElevenLabs Voice ID" className="w-full bg-slate-800 text-xs p-1 rounded-md border border-slate-600" /></div>
+                <div className="flex-grow">
+                    <div className="flex justify-between items-center mb-4">
+                        <span className="text-lg font-bold capitalize text-slate-200">{segment.segment_type}</span>
+                        {!isContent && (<button onClick={() => onRemove(segment.id)} className="text-rose-400 hover:text-rose-300"><Trash2 size={18} /></button>)}
+                    </div>
+                    {isContent ? (<p className="text-slate-400 italic">This is a placeholder for your main episode recording.</p>) : (
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-4">
+                                <label className="text-slate-400 font-medium">Source:</label>
+                                <select value={segment.source.source_type} onChange={handleSourceTypeChange} className="bg-slate-600 rounded-md p-2 border border-slate-500">
+                                    <option value="static">Static File</option>
+                                    <option value="ai_generated">AI Generated</option>
+                                    <option value="tts">TTS (Direct Script)</option>
+                                </select>
+                            </div>
+                            {segment.source.source_type === 'static' ? (
+                                <div className="flex items-center gap-2"><FileAudio size={18} className="text-slate-400" /><input type="text" value={segment.source.filename} onChange={(e) => handleSourceFieldChange('filename', e.target.value)} placeholder="e.g., intro_theme.mp3" className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" /></div>
+                            ) : segment.source.source_type === 'ai_generated' ? (
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2"><Wand2 size={18} className="text-slate-400" /><input type="text" value={segment.source.prompt} onChange={(e) => handleSourceFieldChange('prompt', e.target.value)} placeholder="AI Prompt for script generation..." className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" /></div>
+                                    <div className="flex items-center gap-2 pl-7"><input type="text" value={segment.source.voice_id} onChange={(e) => handleSourceFieldChange('voice_id', e.target.value)} placeholder="ElevenLabs Voice ID" className="w-full bg-slate-800 text-xs p-1 rounded-md border border-slate-600" /></div>
+                                </div>
+                            ) : ( // TTS
+                                <div className="space-y-2">
+                                    <div className="flex items-start gap-2"><Type size={18} className="text-slate-400 mt-2" /><textarea value={segment.source.script} onChange={(e) => handleSourceFieldChange('script', e.target.value)} placeholder="Enter the exact script to be spoken..." className="w-full bg-slate-600 p-2 rounded-md border border-slate-500" rows="3" /></div>
+                                    <div className="flex items-center gap-2 pl-7"><input type="text" value={segment.source.voice_id} onChange={(e) => handleSourceFieldChange('voice_id', e.target.value)} placeholder="ElevenLabs Voice ID" className="w-full bg-slate-800 text-xs p-1 rounded-md border border-slate-600" /></div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
-              )}
             </div>
-          )}
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 const MusicRuleEditor = ({ rule, onUpdate, onRemove }) => {
@@ -479,13 +612,13 @@ const MusicRuleEditor = ({ rule, onUpdate, onRemove }) => {
                     </div>
                 </div>
                 <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2"><NumberInput label="Start Offset (s)" value={rule.start_offset_s} onChange={v => onUpdate(rule.id, {...rule, start_offset_s: v})} /><NumberInput label="End Offset (s)" value={rule.end_offset_s} onChange={v => onUpdate(rule.id, {...rule, end_offset_s: v})} /></div>
-                     <div className="grid grid-cols-2 gap-2"><NumberInput label="Fade In (s)" value={rule.fade_in_s} onChange={v => onUpdate(rule.id, {...rule, fade_in_s: v})} /><NumberInput label="Fade Out (s)" value={rule.fade_out_s} onChange={v => onUpdate(rule.id, {...rule, fade_out_s: v})} /></div>
+                    <div className="grid grid-cols-2 gap-2"><NumberInput label="Start Offset (s)" value={rule.start_offset_s} onChange={v => onUpdate(rule.id, { ...rule, start_offset_s: v })} /><NumberInput label="End Offset (s)" value={rule.end_offset_s} onChange={v => onUpdate(rule.id, { ...rule, end_offset_s: v })} /></div>
+                    <div className="grid grid-cols-2 gap-2"><NumberInput label="Fade In (s)" value={rule.fade_in_s} onChange={v => onUpdate(rule.id, { ...rule, fade_in_s: v })} /><NumberInput label="Fade Out (s)" value={rule.fade_out_s} onChange={v => onUpdate(rule.id, { ...rule, fade_out_s: v })} /></div>
                 </div>
             </div>
-             <div className="mt-4">
+            <div className="mt-4">
                 <label htmlFor={`vol-${rule.id}`} className="block text-sm font-medium text-slate-400">Volume ({rule.volume_db} dB)</label>
-                <input id={`vol-${rule.id}`} type="range" min="-40" max="0" value={rule.volume_db} onChange={e => onUpdate(rule.id, {...rule, volume_db: parseInt(e.target.value)})} className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
+                <input id={`vol-${rule.id}`} type="range" min="-40" max="0" value={rule.volume_db} onChange={e => onUpdate(rule.id, { ...rule, volume_db: parseInt(e.target.value) })} className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
             </div>
         </div>
     );

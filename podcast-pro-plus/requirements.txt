@@ -8,3 +8,7 @@ thefuzz[speedup]
 elevenlabs
 requests
 pytz
+sqlmodel
+passlib[bcrypt]
+python-jose[cryptography]
+Authlib

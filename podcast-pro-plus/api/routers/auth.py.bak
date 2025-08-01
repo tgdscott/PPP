@@ -1,0 +1,141 @@
+from datetime import datetime, timedelta
+from typing import Dict
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from authlib.integrations.starlette_client import OAuth
+
+from ..core.config import settings
+from ..core.security import get_password_hash, verify_password
+from ..models.user import UserCreate, UserPublic, UserInDB
+
+# --- Router Setup ---
+router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"],
+)
+
+# --- OAuth Client Setup ---
+oauth = OAuth()
+oauth.register(
+    name='google',
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_id=settings.GOOGLE_CLIENT_ID,
+    client_secret=settings.GOOGLE_CLIENT_SECRET,
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
+# --- TEMPORARY IN-MEMORY USER DATABASE ---
+# This will be replaced by a real database connection later.
+fake_users_db: Dict[str, UserInDB] = {}
+
+# --- Helper Functions ---
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    """Creates a JWT access token."""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded_jwt
+
+# --- Standard Authentication Endpoints ---
+@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+async def register_user(user_in: UserCreate):
+    """Register a new user with email and password."""
+    if user_in.email in fake_users_db:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with this email already exists.",
+        )
+
+    hashed_password = get_password_hash(user_in.password)
+    user_db = UserInDB(
+        id=uuid4(),
+        email=user_in.email,
+        hashed_password=hashed_password,
+        is_active=True,
+        google_id=user_in.google_id,
+        created_at=datetime.utcnow()
+    )
+    fake_users_db[user_in.email] = user_db
+    return user_db
+
+@router.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Login user with email/password and return an access token."""
+    user = fake_users_db.get(form_data.username)
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# --- Google OAuth Endpoints ---
+@router.get('/login/google')
+async def login_google(request: Request):
+    """Redirects the user to Google's login page."""
+    redirect_uri = request.url_for('auth_google_callback')
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+@router.get('/google/callback')
+async def auth_google_callback(request: Request):
+    """
+    Handles the callback from Google. If successful, it creates/updates
+    the user and issues an access token, then redirects back to the frontend.
+    """
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception as e:
+        # This is the section we were trying to fix.
+        # It now includes better logging.
+        print(f"Authlib Error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate Google credentials. See server logs for details.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    google_user_data = token.get('userinfo')
+    if not google_user_data:
+        raise HTTPException(status_code=400, detail="Could not fetch user info from Google.")
+
+    user_email = google_user_data['email']
+    user = fake_users_db.get(user_email)
+
+    if not user:
+        user_db = UserInDB(
+            id=uuid4(),
+            email=user_email,
+            hashed_password=get_password_hash(str(uuid4())), 
+            is_active=True,
+            google_id=google_user_data['sub'],
+            created_at=datetime.utcnow()
+        )
+        fake_users_db[user_email] = user_db
+        user = user_db
+    elif not user.google_id:
+        user.google_id = google_user_data['sub']
+        fake_users_db[user_email] = user
+
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    
+    frontend_url = f"http://localhost:5173/#access_token={access_token}&token_type=bearer"
+    return RedirectResponse(url=frontend_url)
