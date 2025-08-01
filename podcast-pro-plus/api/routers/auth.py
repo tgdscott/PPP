@@ -3,13 +3,13 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
-from fastapi.security import OAuth2PasswordRequestForm
-from jose import jwt
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from jose import JWTError, jwt
 from authlib.integrations.starlette_client import OAuth
 from sqlmodel import Session
 
 from ..core.config import settings
-from ..core.security import get_password_hash, verify_password
+from ..core.security import verify_password
 from ..models.user import User, UserCreate, UserPublic
 from ..core.database import get_session
 from ..core import crud
@@ -19,6 +19,10 @@ router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
 )
+
+# --- Security Scheme ---
+# This tells FastAPI how to find the token (in the "Authorization: Bearer <token>" header)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 # --- OAuth Client Setup ---
 oauth = OAuth()
@@ -44,6 +48,31 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
+# --- Dependency for getting current user ---
+async def get_current_user(
+    session: Session = Depends(get_session), token: str = Depends(oauth2_scheme)
+) -> User:
+    """
+    Decodes the JWT token to get the current user. This is our bouncer.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    user = crud.get_user_by_email(session=session, email=email)
+    if user is None:
+        raise credentials_exception
+    return user
+
 # --- Standard Authentication Endpoints ---
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def register_user(user_in: UserCreate, session: Session = Depends(get_session)):
@@ -54,7 +83,6 @@ async def register_user(user_in: UserCreate, session: Session = Depends(get_sess
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email already exists.",
         )
-    
     user = crud.create_user(session=session, user_create=user_in)
     return user
 
@@ -88,8 +116,8 @@ async def login_google(request: Request):
 @router.get('/google/callback')
 async def auth_google_callback(request: Request, session: Session = Depends(get_session)):
     """
-    Handles the callback from Google. If successful, it creates/updates
-    the user and issues an access token, then redirects back to the frontend.
+    Handles the callback from Google, creates/updates the user, issues a token,
+    and redirects back to the frontend.
     """
     try:
         token = await oauth.google.authorize_access_token(request)
@@ -109,15 +137,13 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     user = crud.get_user_by_email(session=session, email=user_email)
 
     if not user:
-        # User doesn't exist, create a new one
         user_create = UserCreate(
             email=user_email,
-            password=str(uuid4()), # Create a strong, unusable password
+            password=str(uuid4()),
             google_id=google_user_data['sub']
         )
         user = crud.create_user(session=session, user_create=user_create)
     elif not user.google_id:
-        # User exists but hasn't linked Google yet, so we link it
         user.google_id = google_user_data['sub']
         session.add(user)
         session.commit()
@@ -130,3 +156,12 @@ async def auth_google_callback(request: Request, session: Session = Depends(get_
     
     frontend_url = f"http://127.0.0.1:5173/#access_token={access_token}&token_type=bearer"
     return RedirectResponse(url=frontend_url)
+
+# --- User Test Endpoint ---
+@router.get("/users/me", response_model=UserPublic)
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    """
+    Gets the details of the currently logged-in user.
+    This is a protected endpoint.
+    """
+    return current_user

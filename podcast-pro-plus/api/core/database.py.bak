@@ -2,7 +2,7 @@ from sqlmodel import create_engine, SQLModel, Session
 
 # The database URL tells SQLAlchemy where to find the database file.
 # In this case, it will be a file named "database.db" in the project's root.
-DATABASE_URL = "sqlite:///database.db" 
+DATABASE_URL = "sqlite:///../database.db" 
 
 # The engine is the core interface to the database.
 # connect_args is needed for SQLite to allow it to be used in a multi-threaded

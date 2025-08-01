@@ -3,29 +3,11 @@ from typing import List, Optional, Literal, Union
 from datetime import datetime
 from uuid import UUID, uuid4
 import json
-from enum import Enum
 
 # Import the User model to create a relationship
 from .user import User
 
-# --- Enums for Categories ---
-class MediaCategory(str, Enum):
-    intro = "intro"
-    outro = "outro"
-    music = "music"
-    commercial = "commercial"
-    sfx = "sfx"
-    main_content = "main_content"
-
-class EpisodeStatus(str, Enum):
-    pending = "pending"
-    processing = "processing"
-    processed = "processed"
-    published = "published"
-    error = "error"
-
-
-# --- Schemas for complex JSON data (not DB tables) ---
+# --- Schemas for complex data (not DB tables) ---
 class StaticSegmentSource(SQLModel):
     source_type: Literal["static"] = "static"
     filename: str
@@ -42,7 +24,7 @@ class TTSSegmentSource(SQLModel):
 
 class TemplateSegment(SQLModel):
     id: UUID = Field(default_factory=uuid4)
-    segment_type: Literal["intro", "outro", "commercial", "sound_effect", "transition", "content"]
+    segment_type: Literal["intro", "content", "outro", "commercial", "sound_effect", "transition"]
     source: Union[StaticSegmentSource, AIGeneratedSegmentSource, TTSSegmentSource] = Field(..., discriminator='source_type')
 
 class BackgroundMusicRule(SQLModel):
@@ -59,62 +41,42 @@ class SegmentTiming(SQLModel):
     content_start_offset_s: float = -2.0
     outro_start_offset_s: float = -5.0
 
+# --- NEW: Schema for API Input ---
 class PodcastTemplateCreate(SQLModel):
+    """This model is used to receive data from the frontend."""
     name: str
     segments: List[TemplateSegment]
     background_music_rules: List[BackgroundMusicRule] = []
     timing: SegmentTiming = Field(default_factory=SegmentTiming)
 
+# --- Database Table Model ---
 class PodcastTemplate(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     name: str
     user_id: UUID = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="templates")
+
+    # Store complex data as JSON strings in the database
     segments_json: str = Field(default="[]")
     background_music_rules_json: str = Field(default="[]")
     timing_json: str = Field(default_factory=lambda: SegmentTiming().model_dump_json())
 
-    episodes: List["Episode"] = Relationship(back_populates="template") # Link to episodes
-
+# --- NEW: Schema for API Output ---
 class PodcastTemplatePublic(PodcastTemplateCreate):
+    """This model is used to send data back to the frontend."""
     id: UUID
     user_id: UUID
-
 # --- Media Library Models ---
+
 class MediaItem(SQLModel, table=True):
+    """Represents a single uploaded media file (intro, music, etc.)."""
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
-    category: MediaCategory = Field(default=MediaCategory.music)
     filename: str
     content_type: str
     filesize: int
+    
+    # Link to the user who owns this file
     user_id: UUID = Field(foreign_key="user.id")
     user: Optional[User] = Relationship()
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
-
-# --- NEW: Episode Database Model ---
-class Episode(SQLModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
-    
-    # Relationships
-    user_id: UUID = Field(foreign_key="user.id")
-    user: Optional[User] = Relationship()
-    template_id: UUID = Field(foreign_key="podcasttemplate.id")
-    template: Optional[PodcastTemplate] = Relationship(back_populates="episodes")
-
-    # Episode Metadata
-    title: str = Field(default="Untitled Episode")
-    season_number: Optional[int] = Field(default=None)
-    episode_number: Optional[int] = Field(default=None)
-    show_notes: Optional[str] = Field(default=None)
-    tags: Optional[str] = Field(default=None) # Storing as comma-separated string
-    guests: Optional[str] = Field(default=None) # Storing as comma-separated string
-    
-    # File & Status Info
-    status: EpisodeStatus = Field(default=EpisodeStatus.pending)
-    total_length_seconds: Optional[float] = Field(default=None)
-    final_audio_path: Optional[str] = Field(default=None)
-    transcript_path: Optional[str] = Field(default=None)
-
-    # Timestamps
-    processed_at: datetime = Field(default_factory=datetime.utcnow)
-    publish_at: Optional[datetime] = Field(default=None) # For scheduling

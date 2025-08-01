@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from .core.config import settings
 from .core.database import create_db_and_tables
-from .routers import templates, episodes, auth
+from .routers import templates, episodes, auth, media
 
 app = FastAPI(
     title="Podcast Pro Plus API",
@@ -39,6 +39,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 app.include_router(templates.router)
 app.include_router(episodes.router)
 app.include_router(auth.router)
+app.include_router(media.router)
 
 @app.get("/", tags=["Root"])
 async def read_root():
